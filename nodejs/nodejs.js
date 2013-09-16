@@ -35,7 +35,7 @@ var express = require('express'),
     fs = require('fs'),
     util = require('util'),
     url = require('url'),
-    app = express();
+    app = modules.exports = express();
 
 // Settings
 var settings = {
