@@ -33,51 +33,177 @@
 
 var express = require('express'),
     fs = require('fs'),
-    util = require('util'),
+    path = require('path'),
+    mkdirp = require('mkdirp'),
     url = require('url'),
-    app = modules.exports = express();
+    app = module.exports = express();
 
 // Settings
 var settings = {
-    node_port: process.argv[2] || 8000,
-    uploadPath: __dirname + '/uploads/'
+    nodeHostname: 'localhost',
+    nodePort: 8000,
+    viewsPath: __dirname + '/views',
+    staticPath: __dirname + '/public',
+    uploadPath: __dirname + '/uploads/tmp',
+    savePath: __dirname + '/uploads/final'
 };
 
-app.set('views', __dirname + '/views');
+mkdirp(settings.uploadPath);
+mkdirp(settings.savePath);
+
+// Simple logger
+app.use(function (request, response, next) {
+    console.log('%s %s', request.method, request.url);
+    next();
+})
+
+app.set('views', settings.viewsPath);
 app.set('view engine', 'jade');
 
-app.use(express.static(__dirname + '/public'));
+app.use(express.static(settings.staticPath));
 
-app.use(express.bodyParser({uploadDir: settings.uploadPath}));
+app.use(express.bodyParser({ uploadDir: settings.uploadPath }));
 
 app.get('/', function(request, response) {
+    response.set('Content-Type', 'text/html');
     response.render('index');
 })
 
+function Bucket(){};
+
+Bucket.prototype.erase = function (uuid, cb) {
+    var filePath = path.join(settings.savePath, uuid);
+
+    fs.exists(filePath, function (exists) {
+        if (exists) {
+            var exec = require('child_process').exec,
+                child;
+            child = exec('rm -rf ' + filePath, function (err, out) {
+                if (err) {
+                    console.error(err);
+                    cb(err);
+                }
+                else {
+                    console.log('  deleted: %s : %s', uuid, filePath);
+                    cb();
+                }
+            });
+        } else {
+            cb(new Error("Unable to delete. File does not exist anymore!"));
+        }
+    });
+
+}
+
+Bucket.prototype.save = function (file, cb) {
+
+    var saveFile = function (file) {
+        fs.readFile(file.path, function (err, data) {
+            if (err) {
+                console.error(err);
+                cb(file, err);
+            } else {
+                fs.writeFile(file.savePath, function (err, data) {
+                    if (err) {
+                        console.error(err);
+                        cb(file, err);
+                    } else {
+                        console.log('  uploaded : %s %skb : %s', file.originalFilename, file.size / 1024 | 0, file.savePath);
+                        fs.unlink(file.path, function (err) {
+                            if (err) {
+                                console.error(err);
+                                cb(file, err);
+                            }
+                            else {
+                                cb(file);
+                            }
+                        })
+                    }
+                });
+            }
+        });
+    }
+
+    var basePath = path.dirname(file.savePath);
+    fs.exists(file.savePath, function (exists) {
+        if (!exists) {
+            mkdirp(basePath, function (err) {
+                if (err) console.error(err);
+                else saveFile(file);
+            });
+        } else {
+            saveFile(file);
+        }
+    });
+}
+
+var uploadBucket = new Bucket();
+
 app.post('/upload', function(request, response, next) {
-    // the uploadDir is typically used as a temp save location, but we are just going to use the same directory to
-    // store the final file.
+    // the uploadDir is typically used as a temp save location, but we are
+    // just going to use the same directory to store the final file.
+    var file;
 
-    var savePath = settings.uploadPath;
+    if (request.params._method && request.params._method === 'DELETE') {
+        // we have a DELETE request in disguise.
+    }
 
-    var fileName = request.files.qqfile.name;
+    response.set('Content-Type', 'text/plain');
 
-    //after upload, rename the file and respond to Fine Uploader to notify it of success
-    fs.rename(request.files.qqfile.path, savePath + fileName, function(err) {
-	if (err != null) {
-	    console.log('Err: ' + err);
-	    response.send(JSON.stringify({success: false, error: err}), {'Content-Type': 'text/plain'}, 200);
-	}
-	else {
-	    response.send(JSON.stringify({success: true}), {'Content-Type': 'text/plain'}, 200);
-	    console.log('File Uploaded: ' + savePath + fileName);
-	}
-    })
+    // multipart/form-data request
+    if (request.files) {
+        file = request.files.qqfile;
+        file.name = request.body.qqfilename || '';
+        file.uuid = request.body.qquuid || '';
+        // @TODO(feltnerm): Investigate why uuid makes fs.write error
+        file.savePath = path.join(settings.savePath, file.uuid,  file.name);
+
+        uploadBucket.save(file, function (file, err) {
+            if (err) {
+                response.send(JSON.stringify({
+                    success: false,
+                    error: err
+                }), {'Content-Type': 'text/plain'}, 200);
+            }
+            else {
+                response.send(JSON.stringify({
+                    success: true,
+                    file: file,
+                }), {'Content-Type': 'text/plain'}, 200);
+            }
+        });
+
+    }
+    else {
+        console.log('other kind of request');
+        console.dir(request);
+    }
+
 
 });
 
+app.delete('/upload/:uuid', function (request, response, next) {
+    var uuid = request.params.uuid;
+    response.set('Content-Type', 'text/plain');
 
+    uploadBucket.erase(uuid, function (err) {
+        if (err) {
+            response.send(JSON.stringify({
+                success: false,
+                error: err
+            }), {'Content-Type': 'text/plain'}, 200);
+        }
+        else {
+            response.send(JSON.stringify({
+                success: true,
+            }), {'Content-Type': 'text/plain'}, 200);
+        }
+    });
+
+});
 
 // Starting the express server
-app.listen(settings.node_port, '127.0.0.1');
-console.log("Express server listening on %s:%d for uploads", '127.0.0.1', settings.node_port);
+app.listen(settings.nodePort, settings.nodeHostname, function () {
+    console.log("Express upload server listening on %s:%d.",
+        settings.nodeHostname, settings.nodePort);
+});
