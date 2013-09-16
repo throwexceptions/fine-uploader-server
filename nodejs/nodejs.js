@@ -1,16 +1,15 @@
 /**
  * Node.JS server sample file.
- * 
- * 
+ *
+ *
  *
  * This code requires external modules, which can be downloaded with the following commands:
  * npm install express
- * npm install node-uuid
  * npm install jade
  *
- * This code assumes that there is a uploads/ directory for storing the uploaded files, and that the fine-uploader code 
+ * This code assumes that there is a uploads/ directory for storing the uploaded files, and that the fine-uploader code
  * is available at public/fine-uploader/jquery
- * 
+ *
  *
  * Based in part on Felix Gertz <dev@felixgertz.de> original example.
  * Original comments follow:
@@ -19,7 +18,7 @@
  *
  * If you are using NginX as reverse proxy, please set this in your server block:
  * client_max_body_size    200M;
- * 
+ *
  * I don't believe the following is true any longer, as all my testing has been on 8000 - so perhaps needs further validation:
  **
  ** You have to run the server endpoint on port 80,
@@ -29,13 +28,12 @@
  **
  *
  * @Author: Jeremy Dickens <jeremy@offnominal.com> 2013
- * 
+ *
  */
 
 var express = require('express'),
     fs = require('fs'),
     util = require('util'),
-    uuid = require('node-uuid'),
     url = require('url'),
     app = express();
 
@@ -69,13 +67,13 @@ app.post('/upload', function(request, response, next) {
 	if (err != null) {
 	    console.log('Err: ' + err);
 	    response.send(JSON.stringify({success: false, error: err}), {'Content-Type': 'text/plain'}, 200);
-	} 
+	}
 	else {
 	    response.send(JSON.stringify({success: true}), {'Content-Type': 'text/plain'}, 200);
 	    console.log('File Uploaded: ' + savePath + fileName);
 	}
     })
-    
+
 });
 
 
