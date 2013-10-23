@@ -3,30 +3,21 @@ html
   head
     block head
       title Fine Uploader
-      link(rel='stylesheet', href='fine-uploader-jquery/fineuploader-3.4.1.css')
-      script(src='//ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js')
-      script(src='fine-uploader-jquery/jquery.fineuploader-3.4.1.min.js')
+      link(rel='stylesheet', href='vendor/fineuploader/fineuploader.min.css')
+      link(rel='stylesheet', href='//cdnjs.cloudflare.com/ajax/libs/jqueryui/1.10.3/css/base/jquery.ui.all.css')
+
   body
     block content
-      
+
       div.container
         div.row
           h3 Fine Uploader Node Example
+          div(id='addFiles') Add Files
           #jquery-wrapped-fine-uploader
-            script(type='text/javascript')
-              jQuery(document).ready(function() {
-                jQuery('#jquery-wrapped-fine-uploader').fineUploader({
-                  debug: true,
-                  request: {
-                    endpoint: '/upload',
-                    params: {},
-                    chunking: {
-                      enabled: true,
-                    },
-                    resume: {
-                      enabled: true,
-                    },
-                  }, 
-                });
-              });
+
+
+      script(type='text/javascript', src='//ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js')
+      script(type='text/javascript', src='//cdnjs.cloudflare.com/ajax/libs/jqueryui/1.10.3/jquery-ui.min.js')
+      script(type='text/javascript', src='vendor/fineuploader/all.fineuploader.js')
+      script(type='text/javascript', src='js/main.js')
 

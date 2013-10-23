@@ -33,29 +33,57 @@
 
 var express = require('express'),
     fs = require('fs'),
+    http = require('http'),
     path = require('path'),
     mkdirp = require('mkdirp'),
-    url = require('url'),
-    app = module.exports = express();
+    Bucket = require('./bucket'),
+    app = module.exports = express(),
+    argv = require('optimist')
+        .options('help', {
+            default: false,
+            describe: 'Get help'
+        })
+        .options('h', {
+            alias: 'hostname',
+            default: 'localhost',
+            describe: 'Specifiy hostname'
+        })
+        .options('p', {
+            alias: 'port',
+            default: 8000,
+            describe: 'Specify port'
+        })
+        .options('c', {
+            alias: 'cors',
+            default: false,
+            describe: "Toggle CORS support"
+        })
+        .usage("Fine Uploader upload server.\nUsage: $0")
+        .argv;
+
+if (argv.help) {
+    require('optimist').showHelp();
+    process.exit(0);
+}
+
+/*
+* Application settings and setup
+* ***************************************************************************/
 
 // Settings
 var settings = {
-    nodeHostname: 'localhost',
-    nodePort: 8000,
+    nodeHostname: argv.hostname || 'localhost',
+    nodePort: argv.port || 8000,
     viewsPath: __dirname + '/views',
     staticPath: __dirname + '/public',
     uploadPath: __dirname + '/uploads/tmp',
     savePath: __dirname + '/uploads/final'
 };
 
-mkdirp(settings.uploadPath);
-mkdirp(settings.savePath);
+var uploadBucket = new Bucket(settings);
 
-// Simple logger
-app.use(function (request, response, next) {
-    console.log('%s %s', request.method, request.url);
-    next();
-})
+// Simple logging middleware
+app.use(express.logger('dev'));
 
 app.set('views', settings.viewsPath);
 app.set('view engine', 'jade');
@@ -64,122 +92,107 @@ app.use(express.static(settings.staticPath));
 
 app.use(express.bodyParser({ uploadDir: settings.uploadPath }));
 
+// by default, Fine Uploader expects a Content-Type of 'text/plain'
+// some case call for this to be overriden, but we'll assume that
+// this is the response content-type at first.
+app.use(function (res, res, next) {
+    res.set('Content-Type', 'text/plain');
+    next();
+});
+
+// To CORS, or not to CORS. That is the question:
+if (argv.cors) {
+    app.use(require('./cors')());
+    app.use(require('./xdomain')(settings));
+}
+
+function respond(request, response, data) {
+
+    var status = 200,
+        body = data;
+
+    if (body.error) {
+       status = 500;
+    }
+
+    if (request.xdomain && request.xdomain === true) {
+        response.set('Content-Type', 'text/html');
+        body.uuid = data.file.uuid;
+        body = JSON.stringify(body);
+        // @TODO(feltnerm): This is probably hacky.
+        var origin = request.get('referer');
+        body += "<script src='" + origin + "/js/iframe.xss.response.js'></script>";
+    } else {
+        response.set('Content-Type', 'text/plain');
+        body = JSON.stringify(body);
+    }
+
+    response.send(body);
+
+};
+/*
+* Routes
+* ***************************************************************************/
 app.get('/', function(request, response) {
     response.set('Content-Type', 'text/html');
     response.render('index');
-})
-
-function Bucket(){};
-
-Bucket.prototype.erase = function (uuid, cb) {
-    var filePath = path.join(settings.savePath, uuid);
-
-    fs.exists(filePath, function (exists) {
-        if (exists) {
-            var exec = require('child_process').exec,
-                child;
-            child = exec('rm -rf ' + filePath, function (err, out) {
-                if (err) {
-                    console.error(err);
-                    cb(err);
-                }
-                else {
-                    console.log('  deleted: %s : %s', uuid, filePath);
-                    cb();
-                }
-            });
-        } else {
-            cb(new Error("Unable to delete. File does not exist anymore!"));
-        }
-    });
-
-}
-
-Bucket.prototype.save = function (file, cb) {
-
-    var saveFile = function (file) {
-        fs.readFile(file.path, function (err, data) {
-            if (err) {
-                console.error(err);
-                cb(file, err);
-            } else {
-                fs.writeFile(file.savePath, function (err, data) {
-                    if (err) {
-                        console.error(err);
-                        cb(file, err);
-                    } else {
-                        console.log('  uploaded : %s %skb : %s', file.originalFilename, file.size / 1024 | 0, file.savePath);
-                        fs.unlink(file.path, function (err) {
-                            if (err) {
-                                console.error(err);
-                                cb(file, err);
-                            }
-                            else {
-                                cb(file);
-                            }
-                        })
-                    }
-                });
-            }
-        });
-    }
-
-    var basePath = path.dirname(file.savePath);
-    fs.exists(file.savePath, function (exists) {
-        if (!exists) {
-            mkdirp(basePath, function (err) {
-                if (err) console.error(err);
-                else saveFile(file);
-            });
-        } else {
-            saveFile(file);
-        }
-    });
-}
-
-var uploadBucket = new Bucket();
+});
 
 app.post('/upload', function(request, response, next) {
     // the uploadDir is typically used as a temp save location, but we are
     // just going to use the same directory to store the final file.
     var file;
 
-    if (request.params._method && request.params._method === 'DELETE') {
-        // we have a DELETE request in disguise.
-    }
-
-    response.set('Content-Type', 'text/plain');
-
-    // multipart/form-data request
-    if (request.files) {
+    if (request.body._method && request.body._method === 'DELETE') {
+        // we have a DELETE request in disguise!.
+        uploadBucket.erase(request.body.qquuid, function (err) {
+            if (err) {
+                respond(request, response, { success: false, error: err });
+            } else {
+                respond(request, response, { success: true });
+            }
+        });
+    } else if (request.files) {
         file = request.files.qqfile;
-        file.name = request.body.qqfilename || '';
-        file.uuid = request.body.qquuid || '';
-        // @TODO(feltnerm): Investigate why uuid makes fs.write error
-        file.savePath = path.join(settings.savePath, file.uuid,  file.name);
+        file.uuid = request.body.qquuid;
+        file.name = request.body.qqfilename || 'unknown';
+        file.chunkData = {
+            partIndex : request.body.qqpartindex || 0,
+            partByteOffset : request.body.qqpartbyteoffset || 0,
+            totalFileSize : request.body.qqtotalfilesize || 0,
+            totalParts : request.body.qqtotalparts || 0,
+            chunkSize : request.body.qqchunksize || 0
+        };
+
+        if (file.chunkData && file.chunkData.totalParts > 1 ) {
+            file.name = file.uuid + '_' + file.chunkData.partIndex + '.part';
+        }
+
+        file.savePath = path.join(settings.savePath, file.uuid, file.name);
+
 
         uploadBucket.save(file, function (file, err) {
             if (err) {
-                response.send(JSON.stringify({
-                    success: false,
-                    error: err
-                }), {'Content-Type': 'text/plain'}, 200);
-            }
-            else {
-                response.send(JSON.stringify({
+                respond(request, response, { success: false, error: err });
+            } else {
+                respond(request, response, {
                     success: true,
-                    file: file,
-                }), {'Content-Type': 'text/plain'}, 200);
+                    file: {
+                        originalFilename: file.originalFilename,
+                        path: file.path,
+                        size: file.size,
+                        uuid: file.uuid,
+                        savePath: file.savePath
+                    }
+                });
             }
         });
 
-    }
-    else {
-        console.log('other kind of request');
+    } else {
+        console.error('This request is WEIRD!');
         console.dir(request);
+        res.end(401);
     }
-
-
 });
 
 app.delete('/upload/:uuid', function (request, response, next) {
@@ -188,22 +201,16 @@ app.delete('/upload/:uuid', function (request, response, next) {
 
     uploadBucket.erase(uuid, function (err) {
         if (err) {
-            response.send(JSON.stringify({
-                success: false,
-                error: err
-            }), {'Content-Type': 'text/plain'}, 200);
-        }
-        else {
-            response.send(JSON.stringify({
-                success: true,
-            }), {'Content-Type': 'text/plain'}, 200);
+            respond(request, response, { success: false, error: err });
+        } else {
+            respond({ success: true });
         }
     });
 
 });
 
-// Starting the express server
-app.listen(settings.nodePort, settings.nodeHostname, function () {
-    console.log("Express upload server listening on %s:%d.",
-        settings.nodeHostname, settings.nodePort);
+http.createServer(app).listen(settings.nodePort, settings.nodeHostname,
+    function () {
+        console.log("Express upload server listening on %s:%d.",
+            settings.nodeHostname, settings.nodePort);
 });
