@@ -7,7 +7,8 @@ uploading files to your own server.
 For guidelines useful when integrating your server-side code with Fine Uploader, see the [documentation site](http://docs.fineuploader.com).
 
 <br/>
-#### Support ####
+
+## Support
 
 ##### Traditional upload examples (upload to your own server)
 Widen supports the following traditional endpoint examples: (all other examples were provided and are supported by third parties)
